@@ -134,6 +134,19 @@
     animation: pop-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   }
 
+  /* 有備註的章：加底線點點 */
+  .cell.has-note::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 5px;
+    height: 5px;
+    background: #2a5225;
+    border-radius: 50%;
+  }
+
   .cell.unstamp {
     animation: pop-out 0.18s ease-in forwards;
   }
@@ -192,6 +205,124 @@
     0%   { opacity: 1; transform: translate(0,0) scale(1); }
     100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.4); }
   }
+
+  /* ── Modal 底層遮罩 ── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(30, 60, 25, 0.45);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .modal-overlay.open {
+    display: flex;
+  }
+
+  .modal {
+    background: #d4edce;
+    border-radius: 20px;
+    padding: 24px 24px 20px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 12px 48px rgba(30,60,25,0.3);
+    position: relative;
+    animation: modal-in 0.22s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  }
+  @keyframes modal-in {
+    from { transform: scale(0.85); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+
+  .modal-title {
+    font-size: 16px;
+    font-weight: 900;
+    color: #2a5225;
+    margin-bottom: 6px;
+  }
+  .modal-meta {
+    font-size: 11px;
+    color: #5a8a54;
+    margin-bottom: 12px;
+  }
+
+  .modal textarea {
+    width: 100%;
+    min-height: 90px;
+    border: 1.5px solid #5a9a52;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.6);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 14px;
+    color: #1a3a18;
+    padding: 10px 12px;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .modal textarea:focus {
+    border-color: #2a5225;
+  }
+  .modal textarea::placeholder {
+    color: #8aba84;
+  }
+
+  /* 唯讀模式下的備註顯示 */
+  .note-display {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: #1a3a18;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .note-display.empty {
+    color: #8aba84;
+    font-style: italic;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    justify-content: flex-end;
+  }
+
+  .btn {
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 6px 18px;
+    border-radius: 999px;
+    cursor: pointer;
+    border: 1.5px solid #4a7a44;
+    transition: background 0.15s, color 0.15s;
+    letter-spacing: 0.05em;
+  }
+  .btn-primary {
+    background: #2a5225;
+    color: #d4edce;
+    border-color: #2a5225;
+  }
+  .btn-primary:hover { background: #1a3a18; }
+  .btn-ghost {
+    background: none;
+    color: #2a5225;
+  }
+  .btn-ghost:hover { background: #2a5225; color: #d4edce; }
+  .btn-danger {
+    background: none;
+    color: #8b2020;
+    border-color: #c44;
+    margin-right: auto;
+  }
+  .btn-danger:hover { background: #c44; color: #fff; border-color: #c44; }
 </style>
 </head>
 <body>
@@ -217,23 +348,40 @@
   <button class="reset-btn" onclick="resetAll()">重置全部</button>
 </div>
 
+<!-- 蓋章備註輸入 Modal -->
+<div class="modal-overlay" id="noteModal">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">🖕🏻 記下這次的理由</div>
+    <div class="modal-meta" id="modalMeta"></div>
+    <div id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
 <script>
   const TOTAL = 100;
   const PER_ROW = 10;
   const STAMP = '🖕🏻';
   const STORE_KEY = 'stamp_card_v1';
+  const NOTES_KEY = 'stamp_notes_v1';
 
   let stamped = [];
+  let notes = {};   // { idx: { text, time } }
 
   function loadState() {
     try {
       const s = localStorage.getItem(STORE_KEY);
       stamped = s ? JSON.parse(s) : [];
     } catch(e) { stamped = []; }
+    try {
+      const n = localStorage.getItem(NOTES_KEY);
+      notes = n ? JSON.parse(n) : {};
+    } catch(e) { notes = {}; }
   }
 
   function saveState() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(stamped)); } catch(e) {}
+    try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch(e) {}
   }
 
   function buildGrid() {
@@ -255,10 +403,11 @@
       for (let col = 0; col < PER_ROW; col++) {
         const idx = row * PER_ROW + col;
         const cell = document.createElement('div');
-        cell.className = 'cell' + (stamped.includes(idx) ? ' stamped' : '');
+        const isStamped = stamped.includes(idx);
+        cell.className = 'cell' + (isStamped ? ' stamped' : '') + (isStamped && notes[idx] ? ' has-note' : '');
         cell.dataset.idx = idx;
-        if (stamped.includes(idx)) cell.textContent = STAMP;
-        cell.addEventListener('click', toggleCell);
+        if (isStamped) cell.textContent = STAMP;
+        cell.addEventListener('click', onCellClick);
         cells.appendChild(cell);
       }
 
@@ -269,32 +418,204 @@
     updateCounter();
   }
 
-  function toggleCell(e) {
+  /* 點擊格子：未蓋 → 蓋章輸入備註；已蓋 → 查看/編輯備註 */
+  function onCellClick(e) {
     const cell = e.currentTarget;
     const idx = parseInt(cell.dataset.idx);
 
     if (stamped.includes(idx)) {
-      stamped = stamped.filter(i => i !== idx);
-      cell.classList.remove('stamped');
-      cell.classList.add('unstamp');
-      setTimeout(() => {
-        cell.textContent = '';
-        cell.classList.remove('unstamp');
-      }, 180);
+      openViewModal(idx, cell);
     } else {
-      stamped.push(idx);
-      cell.textContent = STAMP;
-      cell.classList.add('stamped');
-      spawnBurst(cell);
-      if (stamped.length === TOTAL) setTimeout(celebrateFull, 300);
+      openNewModal(idx, cell);
     }
+  }
 
+  /* ── 蓋章 Modal（輸入備註） ── */
+  function openNewModal(idx, cell) {
+    const now = new Date();
+    showModal({
+      title: '🖕🏻 記下這次的理由',
+      meta: formatTime(now),
+      body: `<textarea id="noteInput" placeholder="今天發生了什麼？（可以不寫，直接蓋章）" maxlength="200"></textarea>`,
+      actions: () => {
+        const row = document.createElement('div');
+        row.className = 'modal-actions';
+
+        const skip = mkBtn('跳過直接蓋', 'btn-ghost', () => {
+          closeModal();
+          doStamp(idx, cell, '');
+        });
+        const confirm = mkBtn('蓋章 🖕🏻', 'btn-primary', () => {
+          const text = document.getElementById('noteInput').value.trim();
+          closeModal();
+          doStamp(idx, cell, text);
+        });
+
+        row.appendChild(skip);
+        row.appendChild(confirm);
+        return row;
+      }
+    });
+    // 自動 focus
+    setTimeout(() => {
+      const ta = document.getElementById('noteInput');
+      if (ta) ta.focus();
+    }, 50);
+  }
+
+  /* ── 查看 Modal（已蓋，可編輯或取消蓋章） ── */
+  function openViewModal(idx, cell) {
+    const note = notes[idx];
+    const hasNote = note && note.text;
+    showModal({
+      title: `第 ${idx + 1} 章`,
+      meta: note ? '蓋章時間：' + note.time : '（無時間記錄）',
+      body: hasNote
+        ? `<div class="note-display">${escHtml(note.text)}</div>`
+        : `<div class="note-display empty">沒有留下備註</div>`,
+      actions: () => {
+        const row = document.createElement('div');
+        row.className = 'modal-actions';
+
+        // 左邊：取消蓋章
+        const unstamp = mkBtn('取消此章', 'btn-danger', () => {
+          closeModal();
+          doUnstamp(idx, cell);
+        });
+
+        // 右邊：編輯備註
+        const edit = mkBtn('編輯備註', 'btn-ghost', () => {
+          openEditModal(idx, cell);
+        });
+        const close = mkBtn('關閉', 'btn-primary', closeModal);
+
+        row.appendChild(unstamp);
+        row.appendChild(edit);
+        row.appendChild(close);
+        return row;
+      }
+    });
+  }
+
+  /* ── 編輯備註 Modal ── */
+  function openEditModal(idx, cell) {
+    const note = notes[idx] || {};
+    const current = note.text || '';
+    showModal({
+      title: `✏️ 編輯第 ${idx + 1} 章備註`,
+      meta: note.time ? '蓋章時間：' + note.time : '',
+      body: `<textarea id="noteInput" maxlength="200">${escHtml(current)}</textarea>`,
+      actions: () => {
+        const row = document.createElement('div');
+        row.className = 'modal-actions';
+
+        const cancel = mkBtn('取消', 'btn-ghost', () => openViewModal(idx, cell));
+        const save = mkBtn('儲存', 'btn-primary', () => {
+          const text = document.getElementById('noteInput').value.trim();
+          if (notes[idx]) {
+            notes[idx].text = text;
+          } else {
+            notes[idx] = { text, time: formatTime(new Date()) };
+          }
+          saveState();
+          // 更新格子樣式
+          refreshCell(idx);
+          closeModal();
+        });
+
+        row.appendChild(cancel);
+        row.appendChild(save);
+        return row;
+      }
+    });
+    setTimeout(() => {
+      const ta = document.getElementById('noteInput');
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    }, 50);
+  }
+
+  /* ── 蓋章邏輯 ── */
+  function doStamp(idx, cell, text) {
+    stamped.push(idx);
+    if (text) {
+      notes[idx] = { text, time: formatTime(new Date()) };
+    } else {
+      notes[idx] = { text: '', time: formatTime(new Date()) };
+    }
+    cell.textContent = STAMP;
+    cell.classList.add('stamped');
+    if (text) cell.classList.add('has-note');
+    spawnBurst(cell);
+    saveState();
+    updateCounter();
+    if (stamped.length === TOTAL) setTimeout(celebrateFull, 300);
+  }
+
+  /* ── 取消蓋章邏輯 ── */
+  function doUnstamp(idx, cell) {
+    stamped = stamped.filter(i => i !== idx);
+    delete notes[idx];
+    cell.classList.remove('stamped', 'has-note');
+    cell.classList.add('unstamp');
+    setTimeout(() => {
+      cell.textContent = '';
+      cell.classList.remove('unstamp');
+    }, 180);
     saveState();
     updateCounter();
   }
 
+  /* ── 重繪單一格子 ── */
+  function refreshCell(idx) {
+    const cell = document.querySelector(`.cell[data-idx="${idx}"]`);
+    if (!cell) return;
+    if (notes[idx] && notes[idx].text) {
+      cell.classList.add('has-note');
+    } else {
+      cell.classList.remove('has-note');
+    }
+  }
+
+  /* ── Modal 工廠 ── */
+  function showModal({ title, meta, body, actions }) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalMeta').textContent = meta || '';
+    document.getElementById('modalBody').innerHTML = body;
+    const actEl = document.getElementById('modalActions');
+    actEl.innerHTML = '';
+    actEl.appendChild(actions());
+    document.getElementById('noteModal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('noteModal').classList.remove('open');
+  }
+
+  // 點遮罩關閉
+  document.getElementById('noteModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  function mkBtn(label, cls, fn) {
+    const b = document.createElement('button');
+    b.className = 'btn ' + cls;
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  /* ── 工具函式 ── */
   function updateCounter() {
     document.getElementById('counter').textContent = `已蓋 ${stamped.length} / ${TOTAL} 章`;
+  }
+
+  function formatTime(d) {
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   function spawnBurst(cell) {
@@ -323,8 +644,9 @@
   }
 
   function resetAll() {
-    if (!confirm('確定要重置所有章嗎？')) return;
+    if (!confirm('確定要重置所有章嗎？備註也會一起清除。')) return;
     stamped = [];
+    notes = {};
     saveState();
     buildGrid();
   }
